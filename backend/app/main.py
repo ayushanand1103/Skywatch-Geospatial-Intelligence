@@ -221,6 +221,25 @@ def resolve(alert_id: int, db: Session = Depends(get_db)):
     return {'status': 'resolved'}
 
 
+@app.get('/api/alerts/hotspots', dependencies=[Depends(get_current_user)])
+def anomaly_hotspots(db: Session = Depends(get_db)):
+    """Active alert counts grouped into one-degree geographic cells."""
+    rows = db.execute(text("""
+        SELECT floor(ST_X(position::geometry)) AS cell_lon,
+               floor(ST_Y(position::geometry)) AS cell_lat,
+               count(*) AS alert_count,
+               count(DISTINCT aircraft_icao24) AS aircraft_count,
+               avg(ST_X(position::geometry)) AS longitude,
+               avg(ST_Y(position::geometry)) AS latitude
+        FROM alerts WHERE is_active AND position IS NOT NULL
+        GROUP BY cell_lon, cell_lat ORDER BY alert_count DESC
+    """)).mappings().all()
+    return {'type': 'FeatureCollection', 'features': [
+        {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [r['longitude'], r['latitude']]},
+         'properties': {'count': r['alert_count'], 'aircraft_count': r['aircraft_count']}}
+        for r in rows], 'total_active_alerts': sum(r['alert_count'] for r in rows)}
+
+
 @app.get('/api/alerts/stats', dependencies=[Depends(get_current_user)])
 def alert_stats(db: Session = Depends(get_db)):
     return crud.get_alert_statistics(db)
