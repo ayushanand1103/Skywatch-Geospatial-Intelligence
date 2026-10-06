@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Float,Integer,String,DateTime,ForeignKey,Text,Boolean,JSON
+from sqlalchemy import Column, Float,Integer,String,DateTime,ForeignKey,Text,Boolean,JSON,CheckConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from geoalchemy2 import Geography
@@ -125,3 +125,15 @@ class Alert(Base):
     
     def __repr__(self):
         return f"<Alert {self.alert_type} - {self.severity} - {self.aircraft_callsign}>"
+
+
+class User(Base):
+    __tablename__ = 'users'
+    __table_args__ = (CheckConstraint("role IN ('viewer', 'analyst', 'admin')", name='users_role_check'),)
+    role = Column(String(20), nullable=False, default='viewer', server_default='viewer')
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
