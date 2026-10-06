@@ -289,3 +289,5 @@ def get_busiest_routes(db: Session, limit: int = 10) -> List[Dict]:
         })
     
     return routes
+
+
