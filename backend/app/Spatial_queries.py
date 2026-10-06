@@ -117,7 +117,8 @@ def get_aircraft_near_point(
 def get_aircraft_trajectory(
     db: Session,
     icao24: str,
-    hours_back: int = 24
+    hours_back: int = 24,
+    session_id: Optional[int] = None
 ) -> Optional[Dict]:
     """
     Get aircraft movement trajectory for last N hours
@@ -131,15 +132,12 @@ def get_aircraft_trajectory(
     if not aircraft:
         return None
     
-    positions = db.query(AircraftPosition).filter(
-        AircraftPosition.aircraft_id == aircraft.id,
-        AircraftPosition.created_at >= start_time
-    ).order_by(AircraftPosition.created_at).all()
-    
-    positions = [pos for pos in positions if pos.position is not None]
+    from .flight_sessions import aircraft_sessions
+    sessions = aircraft_sessions(db, aircraft.id, start_time)
+    positions = next((group for group in sessions if group[0].id == session_id), []) if session_id is not None else (sessions[-1] if sessions else [])
     if len(positions) < 2:
         return None
-    
+
     # Build GeoJSON LineString
     coordinates = []
     timestamps = []
@@ -152,6 +150,10 @@ def get_aircraft_trajectory(
         timestamps.append(pos.created_at.isoformat())
         altitudes.append(pos.altitude_meters)
     
+    # Repeated observations at one location do not form a visible flight path.
+    if len(set(tuple(point) for point in coordinates)) < 2:
+        return None
+
     return {
         "type": "Feature",
         "geometry": {
@@ -163,6 +165,7 @@ def get_aircraft_trajectory(
             "callsign": aircraft.call_sign,
             "origin_country": aircraft.origin_country,
             "point_count": len(coordinates),
+            "session_id": positions[0].id,
             "start_time": timestamps[0] if timestamps else None,
             "end_time": timestamps[-1] if timestamps else None,
             "timestamps": timestamps,

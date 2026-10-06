@@ -36,6 +36,7 @@ class AircraftPosition(Base):
     id = Column(Integer, primary_key=True, index = True)
     aircraft_id = Column(Integer, ForeignKey("aircraft.id"), nullable=False)
     position = Column(Geography(geometry_type='POINT', srid=4326))
+    on_ground = Column(Boolean, nullable=True)
     altitude_meters = Column(Float)
     velocity_mps = Column(Float)
     heading_ = Column(Float)

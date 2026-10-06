@@ -61,6 +61,7 @@ def create_aircraft_position(db: Session, aircraft_id: int, data: dict):
     point = _point(data)
     position = AircraftPosition(
         aircraft_id=aircraft_id,
+        on_ground=data.get('on_ground'),
         position=point,
         created_at=data.get('timestamp') or datetime.now(timezone.utc),
         altitude_meters=data.get('altitude_meters', data.get('altitude')),

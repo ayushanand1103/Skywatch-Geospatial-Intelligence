@@ -4,3 +4,17 @@
 .mobile-logout{display:none}@media(max-width:850px){.mobile-logout{display:block;color:var(--muted)}}
 
 .maplibregl-popup-content{background:#1c222a;color:#e5e8ec;border:1px solid #414b57;padding:16px;font-size:12px}.maplibregl-popup-tip{border-top-color:#1c222a!important}
+
+.asset-card{z-index:2;max-width:calc(100% - 36px);max-height:calc(100% - 72px);overflow:auto}.asset-card .close{min-width:36px;min-height:36px;display:grid;place-items:center}.asset-stats strong{overflow-wrap:anywhere}
+@media(max-width:480px){.map-caption>span:last-child{display:none}}
+
+.anomaly-popup .maplibregl-popup-content{background:#1c222a;color:#fff;padding:20px;border:1px solid #596472;border-radius:8px;box-shadow:0 8px 30px #0008}
+.anomaly-popup .maplibregl-popup-close-button{color:#fff;font-size:22px;min-width:36px;min-height:36px}
+.anomaly-popup .maplibregl-popup-tip{border-top-color:#1c222a;border-bottom-color:#1c222a}
+.hotspot-details{max-height:280px;overflow:auto;color:#fff;line-height:1.5;padding-right:8px}
+.hotspot-details h3{font-size:16px;margin:0 24px 8px 0}.hotspot-details h4{font-size:14px;margin:0 0 4px}.hotspot-details p{margin:4px 0;overflow-wrap:anywhere}.hotspot-details section{border-top:1px solid #485260;margin-top:14px;padding-top:12px}.hotspot-alert{margin-top:10px}.hotspot-alert strong{font-size:11px}.hotspot-alert small{font-size:10px;color:#fff}
+
+.trajectory-search{padding:16px 18px;border-bottom:1px solid var(--border);color:#fff}.trajectory-search label{display:block;font-size:12px;margin-bottom:10px}.trajectory-controls{display:flex;gap:10px;flex-wrap:wrap}.trajectory-controls input{flex:1;min-width:130px;padding:10px 12px;color:#fff;text-transform:uppercase}.trajectory-search p{font-size:11px;line-height:1.6;margin:10px 0 0;color:#fff}
+
+.flight-session-picker{margin-top:14px}.flight-session-picker select{width:100%;padding:10px;background:#171b22;color:#fff;border:1px solid #333944;border-radius:5px}.flight-session-picker small{display:block;margin-top:8px;font-size:10px;line-height:1.5;color:#fff}
+.map-error{pointer-events:none;inset:auto 12px 12px auto;max-width:260px;padding:10px;font-size:11px;border:1px solid var(--border);border-radius:5px}

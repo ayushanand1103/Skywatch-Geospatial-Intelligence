@@ -152,11 +152,42 @@ def aircraft_near(lon: float = Query(..., ge=-180, le=180), lat: float = Query(.
             'aircraft': aircraft, 'count': len(aircraft), 'timestamp': now()}
 
 
+@app.get('/api/aircraft/resolve/{callsign}', dependencies=[Depends(get_current_user)])
+def resolve_callsign(callsign: str, db: Session = Depends(get_db)):
+    from sqlalchemy import func
+    from .models import Aircraft
+    matches = db.query(Aircraft).filter(
+        func.upper(func.trim(Aircraft.call_sign)) == callsign.strip().upper()
+    ).all()
+    if not matches:
+        raise HTTPException(404, 'Callsign not found. Enter the aircraft ICAO24 code instead.')
+    if len(matches) > 1:
+        raise HTTPException(409, 'Multiple aircraft have this callsign. Enter the unique ICAO24 code instead.')
+    return {'icao24': matches[0].icao24, 'callsign': matches[0].call_sign}
+
+
+@app.get('/api/aircraft/{icao24}/sessions', dependencies=[Depends(get_current_user)])
+def flight_sessions(icao24: str, hours: int = Query(720, ge=1, le=720), db: Session = Depends(get_db)):
+    from datetime import timedelta
+    from .flight_sessions import aircraft_sessions
+    aircraft = crud.get_aircraft_by_icao24(db, icao24.lower())
+    if aircraft is None:
+        raise HTTPException(404, 'Aircraft not found')
+    groups = aircraft_sessions(db, aircraft.id, datetime.now(timezone.utc) - timedelta(hours=hours))
+    return {'sessions': [
+        {'id': group[0].id, 'icao24': aircraft.icao24,
+         'start_time': group[0].created_at.isoformat(), 'end_time': group[-1].created_at.isoformat(),
+         'point_count': len(group),
+         'has_trajectory': len({tuple(to_shape(p.position).coords[0]) for p in group}) >= 2,
+         'basis': 'Observed takeoff or tracking gap over two hours; older observations have no ground status'}
+        for group in reversed(groups)]}
+
+
 @app.get('/api/aircraft/{icao24}/trajectory', dependencies=[Depends(get_current_user)])
-def trajectory(icao24: str, hours: int = Query(1, ge=1, le=720), db: Session = Depends(get_db)):
+def trajectory(icao24: str, hours: int = Query(1, ge=1, le=720), session_id: int = Query(None, ge=1), db: Session = Depends(get_db)):
     if crud.get_aircraft_by_icao24(db, icao24) is None:
         raise HTTPException(404, 'Aircraft not found')
-    result = spatial.get_aircraft_trajectory(db, icao24, hours)
+    result = spatial.get_aircraft_trajectory(db, icao24, hours, session_id)
     if result is None:
         return {'type': 'Feature', 'geometry': None, 'properties': {'icao24': icao24, 'count': 0}}
     result['properties']['count'] = result['properties']['point_count']
@@ -229,6 +260,12 @@ def anomaly_hotspots(db: Session = Depends(get_db)):
                floor(ST_Y(position::geometry)) AS cell_lat,
                count(*) AS alert_count,
                count(DISTINCT aircraft_icao24) AS aircraft_count,
+               jsonb_agg(jsonb_build_object(
+                   'id', id, 'icao24', aircraft_icao24,
+                   'callsign', aircraft_callsign, 'type', alert_type,
+                   'severity', severity, 'reason', reason,
+                   'detected_at', detected_at
+               ) ORDER BY detected_at DESC, id DESC) AS alerts,
                avg(ST_X(position::geometry)) AS longitude,
                avg(ST_Y(position::geometry)) AS latitude
         FROM alerts WHERE is_active AND position IS NOT NULL
@@ -236,7 +273,7 @@ def anomaly_hotspots(db: Session = Depends(get_db)):
     """)).mappings().all()
     return {'type': 'FeatureCollection', 'features': [
         {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [r['longitude'], r['latitude']]},
-         'properties': {'count': r['alert_count'], 'aircraft_count': r['aircraft_count']}}
+         'properties': {'count': r['alert_count'], 'aircraft_count': r['aircraft_count'], 'alerts': r['alerts']}}
         for r in rows], 'total_active_alerts': sum(r['alert_count'] for r in rows)}
 
 
