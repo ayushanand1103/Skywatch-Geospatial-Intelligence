@@ -55,7 +55,7 @@ def get_or_create_aircraft(db: Session, icao24: str, data: dict):
         db.refresh(aircraft)
         return aircraft
 
-    def create_aircraft_position(db:Session,aircraft_id:int,data:dict):
+def create_aircraft_position(db:Session,aircraft_id:int,data:dict):
         """
         Record aircraft position in the histrory
         Calculate the H3 cell ID for the position and store it in the database.
@@ -87,7 +87,147 @@ def get_or_create_aircraft(db: Session, icao24: str, data: dict):
         
         return position
 
-
+def get_aircraft_in_bbox(db:Session,min_lat:float,min_lon:float,max_lat:float,max_lon:float,limit:int=1000)->List[Aircraft]:
+        """
+        Get all aircraft within a bounding box defined by min and max lat/lon.
+        """
+        bbox = f"POLYGON(({min_lon} {min_lat}, {max_lon} {min_lat}, " \
+           f"{max_lon} {max_lat}, {min_lon} {max_lat}, {min_lon} {min_lat}))"
     
+        aircraft = db.query(Aircraft).filter(
+        Aircraft.last_position.ST_Within(WKTElement(bbox, srid=4326))
+        ).limit(limit).all()
+    
+        return aircraft
+
+def get_aircraft_near_point(db:Session,lon:float,lat:float,radius_km:float,limit:int=100)-> List[Aircraft]:
+        """Get aircrafts within a radius"""
+        point = WKTElement(f"POINT({lon} {lat})", srid=4326)
+        radius_meters = radius_km * 1000
+    
+        aircraft = db.query(Aircraft).filter(
+            ST_DWithin(Aircraft.last_position, point, radius_meters)
+        ).limit(limit).all()
+        
+        return aircraft
+
+def get_aircraft_trajectory(db:Session,aircraft_id:int,start_time:datetime,end_time:datetime)->List[Aircraft]:
+        """Get aircraft position history for time range"""
+        positions = db.query(AircraftPosition).filter(
+        AircraftPosition.aircraft_id == aircraft_id,
+        AircraftPosition.timestamp >= start_time,
+        AircraftPosition.timestamp <= end_time
+    )   .order_by(AircraftPosition.timestamp).all()
+    
+        return positions
+
+def get_aircraft_by_icao24(db: Session, icao24: str):
+    """Get aircraft by ICAO24 identifier"""
+    return db.query(Aircraft).filter(Aircraft.icao24 == icao24).first()
+
+def get_aircraft_positions_since(db: Session, aircraft_id: int, since: datetime, limit: int = 1000):
+    """Get aircraft positions since specific time"""
+    return (
+        db.query(AircraftPosition)
+        .filter(
+            AircraftPosition.aircraft_id == aircraft_id,
+            AircraftPosition.timestamp >= since
+        )
+        .order_by(AircraftPosition.timestamp.asc())
+        .limit(limit)
+        .all()
+
+##Utility functions
+
+def get_stats(db: Session) -> dict:
+    """Get platform statistics"""
+    total_aircraft = db.query(Aircraft).count()
+    total_vessels = db.query(Vessel).count()
+    total_events = db.query(Event).count()
+    total_aircraft_positions = db.query(AircraftPosition).count()
+    
+    return {
+        "total_aircraft": total_aircraft,
+        "total_vessels": total_vessels,
+        "total_events": total_events,
+        "total_aircraft_positions": total_aircraft_positions
+    }
+
+##Alert CRUD operations
+def create_alert(db: Session , alert_data:dict):
+    """Create a new alert in database"""
+    point = f"POINT({alert_data['longitude']} {alert_data['latitude']})"
+    priority = calculate_alert_priority(alert_data)
+    alert = Alert(
+        alert_type=alert_data['type'],
+        severity=alert_data['severity'],
+        reason=alert_data['reason'],
+        aircraft_icao24=alert_data['aircraft_icao24'],
+        aircraft_callsign=alert_data['aircraft_callsign'],
+        position=WKTElement(point, srid=4326),
+        detected_at=datetime.now(timezone.utc),
+        is_active=True,
+        is_acknowledged=False,
+        details=alert_data.get('details', {}),
+        priority=priority
+    )
+    
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
+    return alert
+
+    def get_active_alerts(db: Session, limit: int = 100):
+    """Get all active alerts"""
+    return (
+        db.query(Alert)
+        .filter(Alert.is_active == True)
+        .order_by(Alert.priority.desc(), Alert.detected_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+def get_alerts_by_severity(db: Session, severity: str, limit: int = 100):
+    """Get alerts by severity level"""
+    return (
+        db.query(Alert)
+        .filter(Alert.severity == severity, Alert.is_active == True)
+        .order_by(Alert.detected_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+def get_alerts_for_aircraft(db: Session, icao24: str, limit: int = 50):
+    """Get all alerts for specific aircraft"""
+    return (
+        db.query(Alert)
+        .filter(Alert.aircraft_icao24 == icao24)
+        .order_by(Alert.detected_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+def acknowledge_alert(db: Session, alert_id: int):
+    """Mark alert as acknowledged"""
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if alert:
+        alert.is_acknowledged = True
+        db.commit()
+        db.refresh(alert)
+    return alert
+
+def resolve_alert(db: Session, alert_id: int):
+    """Mark alert as resolved"""
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if alert:
+        alert.is_active = False
+        alert.resolved_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(alert)
+    return alert
+
+
+
+
 
             
