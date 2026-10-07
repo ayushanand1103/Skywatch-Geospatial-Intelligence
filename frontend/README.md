@@ -15,10 +15,11 @@ For production, serve the frontend and `/api` through a same-origin reverse prox
 
 
 Spatial workspaces:
-- Spatial Explorer: radius search and automatic queries for the visible map viewport. Both use aircraft observed in the last 30 minutes and expose result limits.
-- Density: backend H3 polygons and cell statistics for position samples from the last hour. The overview visual-density toggle is independent.
+- Spatial Explorer: radius search and automatic queries for the visible map viewport. Both use aircraft observed in the past hour and expose result limits.
+- Density: backend H3 polygons and cell statistics for unique aircraft active within the past hour. The overview visual-density toggle uses the same active-aircraft map data.
 - Geofences: built-in and persistent custom polygon zones, plus recent aircraft inside a selected zone. Analysts/admins can save and deactivate custom zones. Built-in zone names are examples, not authoritative airspace information.
 - Live Feed: on-demand OpenSky snapshots without storing history. Admins can save a bounded snapshot from Operations or trigger the full scheduled ingestion.
+- ETA Predictor: filters the latest inferred flight session with a constant-velocity Kalman model and estimates arrival at user-supplied destination coordinates. ETA is withheld when the filtered motion is not closing on the destination.
 - Aircraft: session trajectories and aircraft-specific alert history. Alerts also shows backend severity totals.
 
 For an existing database, run `python -m scripts.add_geofences` from `backend` using its virtual environment before starting the updated backend. This creates the geofence table without changing other data. Run the existing ground-status migration if it has not already been applied.

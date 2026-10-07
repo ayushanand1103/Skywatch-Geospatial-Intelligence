@@ -200,6 +200,22 @@ def density(resolution: int = Query(7, ge=0, le=15), min_count: int = Query(5, g
     return {'h3_resolution': resolution, 'cells': cells, 'count': len(cells), 'timestamp': now()}
 
 
+@app.get('/api/aircraft/{icao24}/eta', dependencies=[Depends(get_current_user)])
+def aircraft_eta(icao24: str,
+                 destination_lat: float = Query(..., ge=-90, le=90),
+                 destination_lon: float = Query(..., ge=-180, le=180),
+                 hours: int = Query(24, ge=1, le=720),
+                 db: Session = Depends(get_db)):
+    from .services.kalman_eta import estimate_eta
+    try:
+        result = estimate_eta(db, icao24, destination_lat, destination_lon, hours)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if result is None:
+        raise HTTPException(404, 'Aircraft not found')
+    return result
+
+
 @app.get('/api/stats/spatial', dependencies=[Depends(get_current_user)])
 def spatial_stats(db: Session = Depends(get_db)):
     return spatial.get_spatial_stats(db)
@@ -225,7 +241,11 @@ def serialize_alert(alert):
 def alerts(severity: str = None, active_only: bool = True, limit: int = Query(100, ge=0, le=1000), db: Session = Depends(get_db)):
     query = db.query(Alert)
     if active_only:
-        query = query.filter(Alert.is_active.is_(True))
+        from datetime import timedelta
+        query = query.filter(
+            Alert.is_active.is_(True),
+            Alert.detected_at >= datetime.now(timezone.utc) - timedelta(hours=1),
+        )
     if severity:
         query = query.filter(Alert.severity == severity.upper())
     rows = query.order_by(Alert.priority.desc(), Alert.detected_at.desc()).limit(limit).all()
@@ -254,7 +274,7 @@ def resolve(alert_id: int, db: Session = Depends(get_db)):
 
 @app.get('/api/alerts/hotspots', dependencies=[Depends(get_current_user)])
 def anomaly_hotspots(db: Session = Depends(get_db)):
-    """Active alert counts grouped into one-degree geographic cells."""
+    """Last-hour active alert counts grouped into one-degree geographic cells."""
     rows = db.execute(text("""
         SELECT floor(ST_X(position::geometry)) AS cell_lon,
                floor(ST_Y(position::geometry)) AS cell_lat,
@@ -268,7 +288,9 @@ def anomaly_hotspots(db: Session = Depends(get_db)):
                ) ORDER BY detected_at DESC, id DESC) AS alerts,
                avg(ST_X(position::geometry)) AS longitude,
                avg(ST_Y(position::geometry)) AS latitude
-        FROM alerts WHERE is_active AND position IS NOT NULL
+        FROM alerts
+        WHERE is_active AND position IS NOT NULL
+          AND detected_at >= now() - interval '1 hour'
         GROUP BY cell_lon, cell_lat ORDER BY alert_count DESC
     """)).mappings().all()
     return {'type': 'FeatureCollection', 'features': [
@@ -341,7 +363,7 @@ def geofence_aircraft(fence_id: str, limit: int = Query(1000, ge=1, le=10000), d
         raise HTTPException(404, 'Active geofence not found')
     polygon = Polygon(feature['geometry']['coordinates'][0])
     rows = db.query(Aircraft).filter(
-        Aircraft.last_update >= datetime.now(timezone.utc) - timedelta(minutes=30),
+        Aircraft.last_update >= datetime.now(timezone.utc) - timedelta(hours=1),
         func.ST_Intersects(cast(Aircraft.last_position, Geometry('POINT', srid=4326)), func.ST_GeomFromText(polygon.wkt, 4326)),
     ).order_by(Aircraft.id).limit(limit).all()
     features = []

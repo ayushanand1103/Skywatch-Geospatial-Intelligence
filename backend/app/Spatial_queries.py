@@ -20,7 +20,7 @@ def get_aircraft_in_viewport(
     max_lon: float,
     limit: int = 1000,
 ) -> List[Dict]:
-    """Return GeoJSON features for aircraft updated within the last 30 minutes.
+    """Return GeoJSON features for aircraft updated within the last hour.
 
     Bounds use the existing argument order: min_lon, min_lat, max_lat, max_lon.
     Viewports crossing the antimeridian are not supported.
@@ -37,7 +37,7 @@ def get_aircraft_in_viewport(
     aircraft_list = db.query(Aircraft).filter(
         func.ST_X(geometry).between(min_lon, max_lon),
         func.ST_Y(geometry).between(min_lat, max_lat),
-        Aircraft.last_update >= datetime.now(timezone.utc) - timedelta(minutes=30),
+        Aircraft.last_update >= datetime.now(timezone.utc) - timedelta(hours=1),
     ).order_by(Aircraft.id).limit(limit).all()
 
     result = []
@@ -92,7 +92,7 @@ def get_aircraft_near_point(
             func.ST_GeogFromText(point_wkt),
             radius_meters
         ),
-        Aircraft.last_update >= datetime.now(timezone.utc) - timedelta(minutes=30)
+        Aircraft.last_update >= datetime.now(timezone.utc) - timedelta(hours=1)
     ).order_by('distance_meters').limit(limit)
     
     result = []
@@ -188,21 +188,22 @@ def get_density_heatmap(
         raise ValueError('h3_resolution must be an integer from 0 to 15')
     if isinstance(min_count, bool) or not isinstance(min_count, int) or min_count < 1:
         raise ValueError('min_count must be a positive integer')
-    # Count position samples, rather than unique aircraft, in the last hour.
-    positions = db.query(AircraftPosition).filter(
-        AircraftPosition.created_at >= datetime.now(timezone.utc) - timedelta(hours=1),
-        AircraftPosition.position.isnot(None),
+    # Each Aircraft row represents one ICAO24, so an active aircraft contributes
+    # at most once, using its latest known position.
+    aircraft = db.query(Aircraft).filter(
+        Aircraft.last_update >= datetime.now(timezone.utc) - timedelta(hours=1),
+        Aircraft.last_position.isnot(None),
     ).all()
     cells = {}
-    for pos in positions:
-        point = to_shape(pos.position)
+    for item in aircraft:
+        point = to_shape(item.last_position)
         cell = h3.latlng_to_cell(point.y, point.x, h3_resolution)
         group = cells.setdefault(cell, {'count': 0, 'altitudes': [], 'velocities': []})
         group['count'] += 1
-        if pos.altitude_meters is not None:
-            group['altitudes'].append(pos.altitude_meters)
-        if pos.velocity_mps is not None:
-            group['velocities'].append(pos.velocity_mps)
+        if item.altitude_meters is not None:
+            group['altitudes'].append(item.altitude_meters)
+        if item.velocity_mps is not None:
+            group['velocities'].append(item.velocity_mps)
     result = []
     for cell, group in sorted(cells.items(), key=lambda item: (-item[1]['count'], item[0])):
         if group['count'] >= min_count:
@@ -230,6 +231,14 @@ def get_spatial_stats(db: Session) -> Dict:
     recent_aircraft = db.query(Aircraft).filter(
         Aircraft.last_update >= recent_cutoff
     ).count()
+    airborne_aircraft = db.query(Aircraft).filter(
+        Aircraft.last_update >= recent_cutoff,
+        Aircraft.on_ground.is_(False),
+    ).count()
+    on_ground_aircraft = db.query(Aircraft).filter(
+        Aircraft.last_update >= recent_cutoff,
+        Aircraft.on_ground.is_(True),
+    ).count()
     
     # Geographic coverage 
     coverage_query = text("""
@@ -249,6 +258,8 @@ def get_spatial_stats(db: Session) -> Dict:
         "total_aircraft": total_aircraft,
         "total_positions": total_positions,
         "active_last_hour": recent_aircraft,
+        "airborne_last_hour": airborne_aircraft,
+        "on_ground_last_hour": on_ground_aircraft,
         "countries_covered": coverage.countries_covered if coverage else 0,
         "geographic_bounds": {
             "min_lat": float(coverage.min_lat) if coverage and coverage.min_lat is not None else None,

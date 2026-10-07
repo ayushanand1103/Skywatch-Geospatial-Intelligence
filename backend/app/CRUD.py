@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List
 
 import h3
@@ -150,14 +150,20 @@ def create_alert(db: Session, alert_data: dict):
 
 
 def get_active_alerts(db: Session, limit: int = 100):
-    return db.query(Alert).filter(Alert.is_active.is_(True)).order_by(
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    return db.query(Alert).filter(
+        Alert.is_active.is_(True), Alert.detected_at >= cutoff
+    ).order_by(
         Alert.priority.desc(), Alert.detected_at.desc()
     ).limit(limit).all()
 
 
 def get_alerts_by_severity(db: Session, severity: str, limit: int = 100):
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
     return db.query(Alert).filter(
-        Alert.severity == severity, Alert.is_active.is_(True)
+        Alert.severity == severity,
+        Alert.is_active.is_(True),
+        Alert.detected_at >= cutoff,
     ).order_by(Alert.detected_at.desc()).limit(limit).all()
 
 
@@ -192,7 +198,11 @@ def run_anomaly_detection_on_all_aircraft(db: Session):
         list[Alert]: List of newly created alerts (excludes updated existing ones)
     """
     # ============= STEP 1: Get all aircraft with positions =============
-    aircraft = db.query(Aircraft).filter(Aircraft.last_position.isnot(None)).all()
+    active_cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    aircraft = db.query(Aircraft).filter(
+        Aircraft.last_position.isnot(None),
+        Aircraft.last_update >= active_cutoff,
+    ).all()
     
     if not aircraft:
         return []
@@ -314,18 +324,20 @@ def auto_resolve_old_alerts(db: Session, max_age_minutes=30):
 
   
 def get_alert_statistics(db: Session):
-    """Get alert stats for dashboard"""
+    """Get statistics for active alerts detected or refreshed in the last hour."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    active = (Alert.is_active.is_(True), Alert.detected_at >= cutoff)
     return {
         'total_alerts': db.query(Alert).count(),
-        'active_alerts': db.query(Alert).filter(Alert.is_active == True).count(),
+        'active_alerts': db.query(Alert).filter(*active).count(),
         'by_severity': {
-            'HIGH': db.query(Alert).filter(Alert.severity == 'HIGH', Alert.is_active == True).count(),
-            'MEDIUM': db.query(Alert).filter(Alert.severity == 'MEDIUM', Alert.is_active == True).count(),
-            'LOW': db.query(Alert).filter(Alert.severity == 'LOW', Alert.is_active == True).count()
+            'HIGH': db.query(Alert).filter(Alert.severity == 'HIGH', *active).count(),
+            'MEDIUM': db.query(Alert).filter(Alert.severity == 'MEDIUM', *active).count(),
+            'LOW': db.query(Alert).filter(Alert.severity == 'LOW', *active).count()
         },
         'by_type': {
-            'SPEED_ANOMALY': db.query(Alert).filter(Alert.alert_type == 'SPEED_ANOMALY', Alert.is_active == True).count(),
-            'ALTITUDE_ANOMALY': db.query(Alert).filter(Alert.alert_type == 'ALTITUDE_ANOMALY', Alert.is_active == True).count(),
-            'GEOFENCE_VIOLATION': db.query(Alert).filter(Alert.alert_type == 'GEOFENCE_VIOLATION', Alert.is_active == True).count(),
+            'SPEED_ANOMALY': db.query(Alert).filter(Alert.alert_type == 'SPEED_ANOMALY', *active).count(),
+            'ALTITUDE_ANOMALY': db.query(Alert).filter(Alert.alert_type == 'ALTITUDE_ANOMALY', *active).count(),
+            'GEOFENCE_VIOLATION': db.query(Alert).filter(Alert.alert_type == 'GEOFENCE_VIOLATION', *active).count(),
         }
     }
