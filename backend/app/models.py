@@ -138,3 +138,12 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class Geofence(Base):
+    __tablename__ = 'geofences'
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    coordinates = Column(JSON, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)

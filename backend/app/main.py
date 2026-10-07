@@ -287,6 +287,73 @@ def detect(db: Session = Depends(get_db)):
     return {'alerts_created': len(crud.run_anomaly_detection_on_all_aircraft(db))}
 
 
+
+
+# Custom fences are persisted; detector defaults remain visible as built-in zones.
+from pydantic import BaseModel, Field
+from shapely.geometry import Polygon, mapping
+from .models import Geofence, Aircraft
+
+class GeofenceInput(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    coordinates: list[list[float]] = Field(min_length=3, max_length=500)
+
+def fence_feature(fence_id, name, coordinates, builtin=False):
+    return {'type': 'Feature', 'geometry': mapping(Polygon(coordinates)),
+            'properties': {'id': fence_id, 'name': name, 'builtin': builtin}}
+
+@app.get('/api/geofences', dependencies=[Depends(get_current_user)])
+def geofences(db: Session = Depends(get_db)):
+    from .services.anomaly_detection import AnomalyDetector
+    features = [fence_feature(f'builtin-{i}', f['name'], list(f['polygon'].exterior.coords), True)
+                for i, f in enumerate(AnomalyDetector().geofences)]
+    features.extend(fence_feature(f.id, f.name, f.coordinates)
+                    for f in db.query(Geofence).filter(Geofence.is_active.is_(True)).order_by(Geofence.id).all())
+    return collection(features)
+
+@app.post('/api/geofences', dependencies=[Depends(require_roles('analyst', 'admin'))])
+def create_geofence(payload: GeofenceInput, db: Session = Depends(get_db)):
+    if not payload.name.strip() or any(len(c) != 2 or not (-180 <= c[0] <= 180 and -90 <= c[1] <= 90) for c in payload.coordinates):
+        raise HTTPException(400, 'Provide a name and valid longitude, latitude pairs.')
+    polygon = Polygon(payload.coordinates)
+    if not polygon.is_valid or polygon.is_empty or polygon.area == 0:
+        raise HTTPException(400, 'The polygon must enclose an area without crossing its own edges.')
+    fence = Geofence(name=payload.name.strip(), coordinates=payload.coordinates)
+    db.add(fence); db.commit(); db.refresh(fence)
+    return fence_feature(fence.id, fence.name, fence.coordinates)
+
+@app.post('/api/geofences/{fence_id}/deactivate', dependencies=[Depends(require_roles('analyst', 'admin'))])
+def deactivate_geofence(fence_id: int, db: Session = Depends(get_db)):
+    fence = db.get(Geofence, fence_id)
+    if fence is None:
+        raise HTTPException(404, 'Geofence not found')
+    fence.is_active = False; db.commit()
+    return {'status': 'deactivated'}
+
+@app.get('/api/geofences/{fence_id}/aircraft', dependencies=[Depends(get_current_user)])
+def geofence_aircraft(fence_id: str, limit: int = Query(1000, ge=1, le=10000), db: Session = Depends(get_db)):
+    from datetime import timedelta
+    from sqlalchemy import cast, func
+    from geoalchemy2 import Geometry
+    fences = geofences(db)['features']
+    feature = next((f for f in fences if str(f['properties']['id']) == fence_id), None)
+    if feature is None:
+        raise HTTPException(404, 'Active geofence not found')
+    polygon = Polygon(feature['geometry']['coordinates'][0])
+    rows = db.query(Aircraft).filter(
+        Aircraft.last_update >= datetime.now(timezone.utc) - timedelta(minutes=30),
+        func.ST_Intersects(cast(Aircraft.last_position, Geometry('POINT', srid=4326)), func.ST_GeomFromText(polygon.wkt, 4326)),
+    ).order_by(Aircraft.id).limit(limit).all()
+    features = []
+    for a in rows:
+        point = to_shape(a.last_position)
+        features.append({'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [point.x, point.y]},
+                         'properties': {'icao24': a.icao24, 'callsign': a.call_sign, 'origin_country': a.origin_country,
+                                        'altitude': a.altitude_meters, 'velocity': a.velocity_mps, 'heading': a.heading_,
+                                        'last_update': a.last_update.isoformat()}})
+    return collection(features)
+
+
 if __name__ == '__main__':
     import uvicorn
     uvicorn.run('app.main:app', host='127.0.0.1', port=8000, reload=True)

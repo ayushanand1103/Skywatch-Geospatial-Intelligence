@@ -220,6 +220,9 @@ def run_anomaly_detection_on_all_aircraft(db: Session):
     
     # ============= STEP 3: Run anomaly detection =============
     detector = AnomalyDetector()
+    from .models import Geofence
+    for fence in db.query(Geofence).filter(Geofence.is_active.is_(True)).all():
+        detector.add_geofence(fence.name, fence.coordinates)
     detected_anomalies = detector.detect_all(aircraft_data)
     
     # ============= STEP 4: Create/update alerts with deduplication =============

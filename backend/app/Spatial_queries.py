@@ -208,6 +208,7 @@ def get_density_heatmap(
         if group['count'] >= min_count:
             result.append({
                 'h3_cell': cell,
+                'boundary': [[lon, lat] for lat, lon in h3.cell_to_boundary(cell)],
                 'count': group['count'],
                 'avg_altitude': round(sum(group['altitudes']) / len(group['altitudes']), 2) if group['altitudes'] else None,
                 'avg_velocity': round(sum(group['velocities']) / len(group['velocities']), 2) if group['velocities'] else None,
