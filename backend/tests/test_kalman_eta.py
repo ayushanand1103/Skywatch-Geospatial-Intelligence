@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.models import Aircraft
-from app.services.kalman_eta import estimate_eta
+from app.services.kalman_eta import estimate_eta, eta_confidence_score
 
 
 class Query:
@@ -28,6 +28,17 @@ class Database:
 
 
 class KalmanEtaTests(unittest.TestCase):
+    def test_confidence_score_levels_and_unavailable_eta(self):
+        high = eta_confidence_score(430, 12, 75.4, 600)
+        medium = eta_confidence_score(4000, 5, 20, 1200)
+        unavailable = eta_confidence_score(100, 12, None, None)
+
+        self.assertEqual(high['level'], 'HIGH')
+        self.assertEqual(high['score'], 93)
+        self.assertEqual(medium['level'], 'MEDIUM')
+        self.assertEqual(unavailable['score'], 0)
+        self.assertEqual(unavailable['level'], 'LOW')
+
     def positions(self, east=True):
         start = datetime.now(timezone.utc) - timedelta(minutes=3)
         direction = 1 if east else -1
@@ -47,6 +58,7 @@ class KalmanEtaTests(unittest.TestCase):
         self.assertIsNotNone(result['eta'])
         self.assertGreater(result['filtered_speed_mps'], 0)
         self.assertEqual(result['observations'], 4)
+        self.assertGreater(result['eta_confidence']['score'], 0)
 
     @patch('app.services.kalman_eta.to_shape', side_effect=lambda point: point)
     @patch('app.services.kalman_eta.aircraft_sessions')
@@ -56,6 +68,8 @@ class KalmanEtaTests(unittest.TestCase):
         result = estimate_eta(db, 'abc123', 0.0, 1.0)
         self.assertEqual(result['status'], 'not_approaching')
         self.assertIsNone(result['eta'])
+        self.assertEqual(result['eta_confidence']['score'], 0)
+        self.assertEqual(result['eta_confidence']['level'], 'LOW')
 
     @patch('app.services.kalman_eta.to_shape', side_effect=lambda point: point)
     @patch('app.services.kalman_eta.aircraft_sessions')

@@ -11,6 +11,45 @@ from ..models import Aircraft
 EARTH_RADIUS_M = 6_371_000.0
 
 
+def eta_confidence_score(
+    position_uncertainty_m: float,
+    observations: int,
+    closing_speed_mps: float | None,
+    eta_seconds: float | None,
+) -> dict:
+    """Score how much confidence the available motion data supports."""
+    if eta_seconds is None or closing_speed_mps is None or closing_speed_mps < 5:
+        return {
+            'score': 0,
+            'level': 'LOW',
+            'reason': 'Aircraft is not clearly moving toward the destination.',
+        }
+
+    uncertainty_score = max(0, 100 - (position_uncertainty_m / 100))
+    observation_score = min(100, observations * 10)
+    closing_score = min(100, closing_speed_mps)
+    score = round(
+        0.5 * uncertainty_score
+        + 0.3 * observation_score
+        + 0.2 * closing_score
+    )
+    if score >= 75:
+        level = 'HIGH'
+    elif score >= 45:
+        level = 'MEDIUM'
+    else:
+        level = 'LOW'
+    return {
+        'score': score,
+        'level': level,
+        'reason': (
+            f'Based on {observations} observations, '
+            f'{round(position_uncertainty_m)}m position uncertainty, '
+            f'and {round(closing_speed_mps, 1)} m/s closing speed.'
+        ),
+    }
+
+
 def _to_xy(lon, lat, origin_lon, origin_lat):
     x = radians(lon - origin_lon) * EARTH_RADIUS_M * cos(radians(origin_lat))
     y = radians(lat - origin_lat) * EARTH_RADIUS_M
@@ -87,6 +126,12 @@ def estimate_eta(db, icao24, destination_lat, destination_lon, hours=24):
     eta_seconds = distance / closing_speed if closing_speed >= 5.0 else None
     eta = previous_time + timedelta(seconds=eta_seconds) if eta_seconds is not None else None
     uncertainty = float(sqrt(max(covariance[0, 0], 0) + max(covariance[1, 1], 0)))
+    confidence = eta_confidence_score(
+        position_uncertainty_m=uncertainty,
+        observations=len(points),
+        closing_speed_mps=closing_speed if eta_seconds is not None else None,
+        eta_seconds=eta_seconds,
+    )
     return {
         'icao24': aircraft.icao24,
         'callsign': aircraft.call_sign,
@@ -101,6 +146,7 @@ def estimate_eta(db, icao24, destination_lat, destination_lon, hours=24):
         'eta_seconds': eta_seconds,
         'eta': eta.isoformat() if eta else None,
         'position_uncertainty_m': uncertainty,
+        'eta_confidence': confidence,
         'status': 'approaching' if eta else 'not_approaching',
         'method': 'constant_velocity_kalman',
     }
