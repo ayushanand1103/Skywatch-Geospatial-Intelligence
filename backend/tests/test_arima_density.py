@@ -6,6 +6,7 @@ from app.services.arima_density import (
     _moving_average_forecast,
     _parse_bbox,
     _arima_or_fallback,
+    _h3_polygon_wkt,
 )
 
 
@@ -36,6 +37,13 @@ class ArimaDensityTests(unittest.TestCase):
         self.assertEqual(_parse_bbox('70,20,90,35'), (70.0, 20.0, 90.0, 35.0))
         with self.assertRaisesRegex(ValueError, 'ordering'):
             _parse_bbox('90,20,70,35')
+
+    def test_h3_cell_converts_to_spatial_polygon(self):
+        polygon = _h3_polygon_wkt('872830828ffffff')
+        self.assertTrue(polygon.startswith('POLYGON(('))
+        self.assertTrue(polygon.endswith('))'))
+        coordinates = polygon.removeprefix('POLYGON((').removesuffix('))').split(',')
+        self.assertEqual(coordinates[0], coordinates[-1])
 
 
 if __name__ == '__main__':

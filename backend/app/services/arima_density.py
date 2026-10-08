@@ -47,6 +47,13 @@ def _parse_bbox(bbox: str | None) -> tuple[float, float, float, float] | None:
     return min_lon, min_lat, max_lon, max_lat
 
 
+def _h3_polygon_wkt(cell_id: str) -> str:
+    boundary = [(lon, lat) for lat, lon in h3.cell_to_boundary(cell_id)]
+    boundary.append(boundary[0])
+    coordinates = ','.join(f'{lon} {lat}' for lon, lat in boundary)
+    return f'POLYGON(({coordinates}))'
+
+
 def _arima_or_fallback(values: list[int], steps: int, order: tuple[int, int, int]):
     minimum_points = max(8, sum(order) + 3)
     if len(values) < minimum_points or len(set(values)) < 2:
@@ -95,7 +102,12 @@ def forecast_density(
         AircraftPosition.created_at < end_bucket,
     )
     if h3_cell_id:
-        query = query.filter(AircraftPosition.h3_cell_id == h3_cell_id)
+        # Density cells can use any H3 resolution, while stored IDs use
+        # resolution 7. A spatial filter keeps forecasting compatible with
+        # every cell returned by the Density page.
+        geometry = cast(AircraftPosition.position, Geometry('POINT', srid=4326))
+        cell_geometry = func.ST_GeomFromText(_h3_polygon_wkt(h3_cell_id), 4326)
+        query = query.filter(func.ST_Intersects(geometry, cell_geometry))
     if bounds:
         geometry = cast(AircraftPosition.position, Geometry('POINT', srid=4326))
         query = query.filter(func.ST_Intersects(geometry, func.ST_MakeEnvelope(*bounds, 4326)))
