@@ -124,13 +124,14 @@ def forecast_density(
     ]
     scope = {'h3_cell_id': h3_cell_id, 'bbox': list(bounds) if bounds else None}
     if model == 'ARIMA':
-        message = 'Traffic density forecast generated with ARIMA.'
+        message = 'Active-aircraft density forecast generated with ARIMA.'
     else:
-        message = 'Not enough varied history for ARIMA; using a three-interval moving average.'
+        message = 'Not enough varied active-aircraft history for ARIMA; using a three-interval moving average.'
     return {
         'model': model,
         'status': status,
         'message': message,
+        'metric': 'distinct_active_aircraft_per_interval',
         'order': list(order),
         'interval_minutes': interval_minutes,
         'scope': scope,
