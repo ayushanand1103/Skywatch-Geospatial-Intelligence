@@ -200,6 +200,33 @@ def density(resolution: int = Query(7, ge=0, le=15), min_count: int = Query(5, g
     return {'h3_resolution': resolution, 'cells': cells, 'count': len(cells), 'timestamp': now()}
 
 
+@app.get('/api/forecast/density', dependencies=[Depends(get_current_user)])
+def density_forecast(
+    h3_cell_id: str | None = None,
+    bbox: str | None = None,
+    hours: int = Query(24, ge=1, le=720),
+    interval_minutes: int = Query(15, ge=5, le=180),
+    steps: int = Query(8, ge=1, le=96),
+    p: int = Query(1, ge=0, le=5),
+    d: int = Query(1, ge=0, le=2),
+    q: int = Query(1, ge=0, le=5),
+    db: Session = Depends(get_db),
+):
+    from .services.arima_density import forecast_density
+    try:
+        return forecast_density(
+            db=db,
+            h3_cell_id=h3_cell_id,
+            bbox=bbox,
+            hours=hours,
+            interval_minutes=interval_minutes,
+            steps=steps,
+            order=(p, d, q),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.get('/api/aircraft/{icao24}/eta', dependencies=[Depends(get_current_user)])
 def aircraft_eta(icao24: str,
                  destination_lat: float = Query(..., ge=-90, le=90),
